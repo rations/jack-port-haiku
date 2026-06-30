@@ -394,6 +394,16 @@ def configure(conf):
         # BApplication/BLooper machinery it depends on (libbe).
         conf.env['LIB_MEDIA'] = ['media']
         conf.env['LIB_BE'] = ['be']
+        # The hmulti_audio backend uses the kernel audio driver contract, which
+        # ships as a private (non-default) development header. Locate it with
+        # findpaths so the build does not hard-code an install location.
+        try:
+            audio_headers = conf.cmd_and_log(
+                ['findpaths', '-e', 'B_FIND_PATH_DEVELOP_DIRECTORY',
+                 'headers/private/audio']).strip()
+            conf.env['INCLUDES_HMULTI'] = [audio_headers]
+        except Exception:
+            conf.env['INCLUDES_HMULTI'] = []
     conf.env['JACK_API_VERSION'] = JACK_API_VERSION
     conf.env['JACK_VERSION'] = VERSION
 
@@ -731,6 +741,11 @@ def build_drivers(bld):
         'haiku/JackHaikuDriver.cpp'
     ]
 
+    hmulti_src = [
+        'haiku/JackHmultiDriver.cpp',
+        'common/memops.c'
+    ]
+
     coremidi_src = [
         'macosx/coremidi/JackCoreMidiInputPort.mm',
         'macosx/coremidi/JackCoreMidiOutputPort.mm',
@@ -869,6 +884,11 @@ def build_drivers(bld):
             target='haiku',
             source=haiku_src,
             use=['MEDIA', 'BE'])
+        create_driver_obj(
+            bld,
+            target='hmulti',
+            source=hmulti_src,
+            use=['HMULTI'])
 
     if bld.env['IS_FREEBSD']:
         create_driver_obj(
