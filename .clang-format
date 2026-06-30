@@ -1,0 +1,24 @@
+# Code style for the jackd2 -> Haiku port.
+#
+# This encodes upstream jack2's *house* C++ style (verified against linux/alsa/JackAlsaDriver.cpp,
+# our primary backend model) so our new Haiku code is consistent with the surrounding engine and
+# stays upstreamable. jack2 itself ships no .clang-format, and older files are inconsistent
+# (some use tabs); this matches the dominant, modern backend-driver convention:
+#   - 4-space indent, spaces only
+#   - Linux brace style: function/class/namespace braces break to their own line;
+#     control-statement braces ( ) { ) attach
+#   - ~100 col practical width (kept by hand; ColumnLimit is 0 so clang-format never rewraps
+#     jack2's hand-aligned parameter lists — verified to minimize churn vs the real ALSA driver)
+#
+# Apply ONLY to files newly authored for this port. Do NOT run clang-format -i across imported
+# upstream jack2 files — that would produce a huge, non-upstreamable diff.
+BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 0
+AccessModifierOffset: -4
+BreakBeforeBraces: Linux
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: Never
+PointerAlignment: Left

@@ -1,0 +1,29 @@
+# --- Local-only project control files (not for publication) ---
+.claude/
+CLAUDE.md
+RULES.md
+Checksum
+run-vm.sh
+
+# --- Large / generated dev artifacts ---
+# Haiku installer images and VM disks
+haiku-r1beta5-x86_64-anyboot.iso
+*.iso
+*.qcow2
+*.img
+
+# --- Build output (waf) ---
+build/
+.waf*/
+.lock-waf*
+*.o
+*.lo
+*.a
+*.so
+*.so.*
+*.dylib
+
+# --- Editor / OS cruft ---
+*.swp
+*~
+.DS_Store
