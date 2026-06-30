@@ -390,6 +390,10 @@ def configure(conf):
         conf.env['LIB_DL'] = []
         conf.env['LIB_RT'] = []
         conf.env['LIB_NETWORK'] = ['network']
+        # The Media Kit driver pulls in BSoundPlayer (libmedia) and the
+        # BApplication/BLooper machinery it depends on (libbe).
+        conf.env['LIB_MEDIA'] = ['media']
+        conf.env['LIB_BE'] = ['be']
     conf.env['JACK_API_VERSION'] = JACK_API_VERSION
     conf.env['JACK_VERSION'] = VERSION
 
@@ -723,6 +727,10 @@ def build_drivers(bld):
         'common/JackAC3Encoder.cpp'
     ]
 
+    haiku_src = [
+        'haiku/JackHaikuDriver.cpp'
+    ]
+
     coremidi_src = [
         'macosx/coremidi/JackCoreMidiInputPort.mm',
         'macosx/coremidi/JackCoreMidiOutputPort.mm',
@@ -854,6 +862,13 @@ def build_drivers(bld):
             source=coremidi_src,
             use=['serverlib'],  # FIXME: Is this needed?
             framework=['AudioUnit', 'CoreMIDI', 'CoreServices', 'Foundation'])
+
+    if bld.env['IS_HAIKU']:
+        create_driver_obj(
+            bld,
+            target='haiku',
+            source=haiku_src,
+            use=['MEDIA', 'BE'])
 
     if bld.env['IS_FREEBSD']:
         create_driver_obj(
