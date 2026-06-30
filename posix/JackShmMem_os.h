@@ -26,7 +26,15 @@
 
 #define CHECK_MLOCK(ptr, size) (mlock((ptr), (size)) == 0)
 #define CHECK_MUNLOCK(ptr, size) (munlock((ptr), (size)) == 0)
+#ifdef HAVE_MLOCKALL
 #define CHECK_MLOCKALL() (mlockall(MCL_CURRENT | MCL_FUTURE) == 0)
 #define CHECK_MUNLOCKALL() (munlockall() == 0)
+#else
+/* Platforms without mlockall() (e.g. Haiku): there is no whole-address-space
+   lock. Individual JACK shm segments are still locked via CHECK_MLOCK above, so
+   treat the global lock as a successful no-op. */
+#define CHECK_MLOCKALL() (1)
+#define CHECK_MUNLOCKALL() (1)
+#endif
 
 #endif

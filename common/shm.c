@@ -49,7 +49,9 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/shm.h>
+#ifndef USE_POSIX_SHM
+#include <sys/shm.h> /* System V shared memory (not present on e.g. Haiku) */
+#endif
 #include <sys/sem.h>
 #include <stdlib.h>
 #include "promiscuous.h"

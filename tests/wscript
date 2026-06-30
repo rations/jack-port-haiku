@@ -25,6 +25,8 @@ def build(bld):
             prog.includes = ['..', '../freebsd', '../posix', '../common/jack', '../common']
         if bld.env['IS_SUN']:
             prog.includes = ['..', '../solaris', '../posix', '../common/jack', '../common']
+        if bld.env['IS_HAIKU']:
+            prog.includes = ['..', '../haiku', '../posix', '../common/jack', '../common']
         prog.source = test_program_sources
         if bld.env['IS_LINUX']:
             prog.uselib = 'RT'

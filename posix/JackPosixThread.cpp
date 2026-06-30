@@ -118,6 +118,7 @@ int JackPosixThread::StartImp(jack_native_thread_t* thread, int priority, int re
 
         jack_log("JackPosixThread::StartImp : create RT thread");
 
+#ifdef HAVE_PTHREAD_ATTR_SETSCHEDPOLICY
         if ((res = pthread_attr_setinheritsched(&attributes, PTHREAD_EXPLICIT_SCHED))) {
             jack_error("Cannot request explicit scheduling for RT thread res = %d", res);
             return -1;
@@ -135,12 +136,15 @@ int JackPosixThread::StartImp(jack_native_thread_t* thread, int priority, int re
             jack_error("Cannot set scheduling priority for RT thread res = %d", res);
             return -1;
         }
+#endif
 
     } else {
         jack_log("JackPosixThread::StartImp : create non RT thread");
+#ifdef HAVE_PTHREAD_ATTR_SETSCHEDPOLICY
         if ((res = pthread_attr_setinheritsched(&attributes, PTHREAD_EXPLICIT_SCHED))) {
             jack_log("Cannot request explicit scheduling for non RT thread res = %d", res);
         }
+#endif
     }
 
     if ((res = pthread_attr_setstacksize(&attributes, THREAD_STACK))) {
@@ -152,6 +156,19 @@ int JackPosixThread::StartImp(jack_native_thread_t* thread, int priority, int re
         jack_error("Cannot create thread res = %d", res);
         return -1;
     }
+
+#ifndef HAVE_PTHREAD_ATTR_SETSCHEDPOLICY
+    // Platforms without attribute-level scheduling (e.g. Haiku) apply the
+    // real-time policy and priority once the thread exists.
+    if (realtime) {
+        memset(&rt_param, 0, sizeof(rt_param));
+        rt_param.sched_priority = priority;
+        if ((res = pthread_setschedparam(*thread, JACK_SCHED_POLICY, &rt_param))) {
+            jack_error("Cannot set RT scheduling priority for thread res = %d", res);
+            return -1;
+        }
+    }
+#endif
 
     pthread_attr_destroy(&attributes);
     return 0;

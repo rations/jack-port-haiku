@@ -225,6 +225,7 @@ def detect_platform(conf):
         ('IS_FREEBSD', 'FreeBSD', ['freebsd']),
         ('IS_MACOSX',  'MacOS X', ['darwin']),
         ('IS_SUN',     'SunOS',   ['sunos']),
+        ('IS_HAIKU',   'Haiku',   ['haiku']),
         ('IS_WINDOWS', 'Windows', ['cygwin', 'msys', 'win32'])
     ]
 
@@ -316,6 +317,41 @@ def configure(conf):
         define_name='HAVE_EXECINFO_H',
         mandatory=False)
 
+    # Some platforms (e.g. Haiku) do not implement attribute-level scheduling
+    # (pthread_attr_setschedpolicy / pthread_attr_setinheritsched). Where they
+    # are missing, the POSIX thread code applies the policy after creation with
+    # pthread_setschedparam instead.
+    conf.check(
+        fragment=''
+        + '#include <pthread.h>\n'
+        + 'int\n'
+        + 'main(void)\n'
+        + '{\n'
+        + '   pthread_attr_t attr;\n'
+        + '   pthread_attr_setschedpolicy(&attr, 0);\n'
+        + '   pthread_attr_setinheritsched(&attr, 0);\n'
+        + '   return 0;\n'
+        + '}\n',
+        lib='pthread',
+        msg='Checking for pthread_attr_setschedpolicy',
+        define_name='HAVE_PTHREAD_ATTR_SETSCHEDPOLICY',
+        mandatory=False)
+
+    # mlockall()/munlockall() lock all process memory at once. Some platforms
+    # (e.g. Haiku) only provide per-range mlock()/munlock(); JACK still locks
+    # its individual shm segments there, just not the whole address space.
+    conf.check(
+        fragment=''
+        + '#include <sys/mman.h>\n'
+        + 'int\n'
+        + 'main(void)\n'
+        + '{\n'
+        + '   return mlockall(MCL_CURRENT | MCL_FUTURE) + munlockall();\n'
+        + '}\n',
+        msg='Checking for mlockall',
+        define_name='HAVE_MLOCKALL',
+        mandatory=False)
+
     conf.recurse('common')
     if Options.options.dbus:
         conf.recurse('dbus')
@@ -347,6 +383,13 @@ def configure(conf):
     conf.env['LIB_RT'] = ['rt']
     conf.env['LIB_M'] = ['m']
     conf.env['LIB_STDC++'] = ['stdc++']
+    if conf.env['IS_HAIKU']:
+        # On Haiku dlopen() and the POSIX clocks live in libroot (linked
+        # automatically), so there is no -ldl or -lrt. Sockets live in
+        # libnetwork rather than libroot.
+        conf.env['LIB_DL'] = []
+        conf.env['LIB_RT'] = []
+        conf.env['LIB_NETWORK'] = ['network']
     conf.env['JACK_API_VERSION'] = JACK_API_VERSION
     conf.env['JACK_VERSION'] = VERSION
 
@@ -555,6 +598,9 @@ def obj_add_includes(bld, obj):
     if bld.env['IS_SUN']:
         obj.includes += ['posix', 'solaris']
 
+    if bld.env['IS_HAIKU']:
+        obj.includes += ['haiku', 'posix']
+
     if bld.env['IS_WINDOWS']:
         obj.includes += ['windows']
 
@@ -579,6 +625,9 @@ def build_jackd(bld):
 
     if bld.env['IS_FREEBSD']:
         jackd.use += ['M', 'PTHREAD']
+
+    if bld.env['IS_HAIKU']:
+        jackd.use += ['M', 'PTHREAD', 'NETWORK']
 
     if bld.env['IS_MACOSX']:
         jackd.use += ['DL', 'PTHREAD']
