@@ -1,29 +1,40 @@
-# --- Local-only project control files (not for publication) ---
+.lock*
+.stamp_*
+.DS_Store
+__pycache__
+*.dll
+*.pyc
+*.pkg
+flake8.txt
+codeBlocks
+/android/.server/
+/android/.client/
+/build/
+/man/*.1
+
+# common release files
+/destdir/
+
+# macos release files
+/macos/package.xml
+/macos/package-welcome.txt
+
+# windows release files
+/innosetup/
+/is.exe
+/windows/inno/version.iss
+/windows/inno/win32
+/windows/inno/win64
+
+# --- Local-only Haiku-port dev files (not for publication / not for upstream) ---
 .claude/
 CLAUDE.md
 RULES.md
 Checksum
 run-vm.sh
 
-# --- Large / generated dev artifacts ---
-# Haiku installer images and VM disks
+# Haiku installer image and VM disk
 haiku-r1beta5-x86_64-anyboot.iso
 *.iso
 *.qcow2
 *.img
-
-# --- Build output (waf) ---
-build/
-.waf*/
-.lock-waf*
-*.o
-*.lo
-*.a
-*.so
-*.so.*
-*.dylib
-
-# --- Editor / OS cruft ---
-*.swp
-*~
-.DS_Store

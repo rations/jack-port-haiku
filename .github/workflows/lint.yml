@@ -1,0 +1,21 @@
+---
+
+name: Test wscript files
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+    branches: [master, develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -qqy flake8 findutils
+      - name: Lint with flake8
+        run: find . -type f \( -iname wscript -or -iname jack_control \) -exec flake8 {} \;
