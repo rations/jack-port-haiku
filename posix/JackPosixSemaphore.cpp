@@ -130,6 +130,14 @@ bool JackPosixSemaphore::TimedWait(long usec)
 		jack_error("JackPosixSemaphore::TimedWait name = %s already deallocated!!", fName);
 		return false;
 	}
+	/* A "wait until signalled" request (very large usec, e.g. LONG_MAX from
+	   JackClient::WaitSync) produces an absolute deadline that overflows
+	   sem_timedwait()'s internal time conversion on some platforms (Haiku),
+	   making it fail immediately. No real audio timeout is anywhere near this
+	   large, so treat it as an unbounded blocking wait, which is the intent. */
+	if (usec >= 3600 * 1000000L) {
+		return Wait();
+	}
 	gettimeofday(&now, 0);
 	time.tv_sec = now.tv_sec + usec / 1000000;
     long tv_usec = (now.tv_usec + (usec % 1000000));

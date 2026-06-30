@@ -25,12 +25,32 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #include <string.h> // for memset
 #include <unistd.h> // for _POSIX_PRIORITY_SCHEDULING check
 
-//#define JACK_SCHED_POLICY SCHED_RR
-#define JACK_SCHED_POLICY SCHED_FIFO
-
 #if defined(__linux__) && !defined(SCHED_RESET_ON_FORK)
 # define SCHED_RESET_ON_FORK 0x40000000
 #endif
+
+/* Real-time scheduling differs across POSIX systems: most provide SCHED_FIFO,
+   while Haiku provides only SCHED_RR (real-time priority band 100..120).
+   Select a policy the platform actually supports at runtime, and clamp the
+   engine's requested priority into that policy's valid range, so the same
+   engine priorities work everywhere. */
+static int jack_rt_policy()
+{
+    return (sched_get_priority_min(SCHED_FIFO) != -1) ? SCHED_FIFO : SCHED_RR;
+}
+
+static int jack_clamp_rt_priority(int policy, int priority)
+{
+    int min = sched_get_priority_min(policy);
+    int max = sched_get_priority_max(policy);
+    if (min != -1 && priority < min) {
+        priority = min;
+    }
+    if (max != -1 && priority > max) {
+        priority = max;
+    }
+    return priority;
+}
 
 namespace Jack
 {
@@ -124,13 +144,13 @@ int JackPosixThread::StartImp(jack_native_thread_t* thread, int priority, int re
             return -1;
         }
 
-        if ((res = pthread_attr_setschedpolicy(&attributes, JACK_SCHED_POLICY))) {
+        if ((res = pthread_attr_setschedpolicy(&attributes, jack_rt_policy()))) {
             jack_error("Cannot set RR scheduling class for RT thread res = %d", res);
             return -1;
         }
 
         memset(&rt_param, 0, sizeof(rt_param));
-        rt_param.sched_priority = priority;
+        rt_param.sched_priority = jack_clamp_rt_priority(jack_rt_policy(), priority);
 
         if ((res = pthread_attr_setschedparam(&attributes, &rt_param))) {
             jack_error("Cannot set scheduling priority for RT thread res = %d", res);
@@ -161,9 +181,10 @@ int JackPosixThread::StartImp(jack_native_thread_t* thread, int priority, int re
     // Platforms without attribute-level scheduling (e.g. Haiku) apply the
     // real-time policy and priority once the thread exists.
     if (realtime) {
+        int policy = jack_rt_policy();
         memset(&rt_param, 0, sizeof(rt_param));
-        rt_param.sched_priority = priority;
-        if ((res = pthread_setschedparam(*thread, JACK_SCHED_POLICY, &rt_param))) {
+        rt_param.sched_priority = jack_clamp_rt_priority(policy, priority);
+        if ((res = pthread_setschedparam(*thread, policy, &rt_param))) {
             jack_error("Cannot set RT scheduling priority for thread res = %d", res);
             return -1;
         }
@@ -253,17 +274,18 @@ int JackPosixThread::AcquireRealTimeImp(jack_native_thread_t thread, int priorit
 {
     struct sched_param rtparam;
     int res;
+    int policy = jack_rt_policy();
     memset(&rtparam, 0, sizeof(rtparam));
-    rtparam.sched_priority = priority;
+    rtparam.sched_priority = jack_clamp_rt_priority(policy, priority);
 
     jack_log("JackPosixThread::AcquireRealTimeImp priority = %d", priority);
 
-    if ((res = pthread_setschedparam(thread, JACK_SCHED_POLICY, &rtparam)) == 0)
+    if ((res = pthread_setschedparam(thread, policy, &rtparam)) == 0)
         return 0;
 
 #ifdef SCHED_RESET_ON_FORK
     jack_log("pthread_setschedparam() failed (%d), trying with SCHED_RESET_ON_FORK.", res);
-    if ((res = pthread_setschedparam(thread, JACK_SCHED_POLICY|SCHED_RESET_ON_FORK, &rtparam)) == 0)
+    if ((res = pthread_setschedparam(thread, policy|SCHED_RESET_ON_FORK, &rtparam)) == 0)
         return 0;
 #endif
 
@@ -326,14 +348,14 @@ bool jack_get_thread_realtime_priority_range(int * min_ptr, int * max_ptr)
 #if defined(_POSIX_PRIORITY_SCHEDULING) && !defined(__APPLE__)
     int min, max;
 
-    min = sched_get_priority_min(JACK_SCHED_POLICY);
+    min = sched_get_priority_min(jack_rt_policy());
     if (min == -1)
     {
         jack_error("sched_get_priority_min() failed.");
         return false;
     }
 
-    max = sched_get_priority_max(JACK_SCHED_POLICY);
+    max = sched_get_priority_max(jack_rt_policy());
     if (max == -1)
     {
         jack_error("sched_get_priority_max() failed.");
