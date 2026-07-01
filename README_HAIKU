@@ -1,0 +1,120 @@
+JACK2 on Haiku
+==============
+
+This is a native port of JACK2 (jackd2), the low-latency audio server, to Haiku,
+including a new Media Kit based audio backend. It is a real port of the JACK
+engine (graph, transport, multi-client, libjack) running on Haiku, not an
+API-emulation shim.
+
+
+Status
+------
+
+Built and running on Haiku R1/beta5 x86_64 (developed against current Haiku,
+tested both in a QEMU/KVM VM and on bare-metal hardware):
+
+- The portable engine, libjack/libjackserver, and the POSIX IPC layer
+  (threads, semaphores, shared memory, sockets, FIFOs) build and run.
+- "jackd -d dummy" starts, accepts clients, and shuts down cleanly.
+- The standard JACK example tools (jack_lsp, jack_metro, jack_connect,
+  jack_iodelay, ...) connect and run.
+- Three audio backends are available:
+    dummy   - no hardware; for testing the engine and IPC.
+    haiku   - BSoundPlayer; routed through the system mixer; stereo; the
+              simplest audible path.
+    hmulti  - direct /dev/audio/hmulti access; low latency, multi-channel,
+              full-duplex; the primary target.
+- On real HD Audio hardware, "jackd -d hmulti" runs full-duplex at a 128-frame
+  period (48 kHz). Audible output and playback+capture ports are confirmed, and
+  the device buffer size is honored for low latency.
+
+
+Building
+--------
+
+Install the build prerequisites with pkgman:
+
+    pkgman install -y gcc make pkgconfig mpc mpfr haiku_devel
+
+A minimal Haiku install lacks these: mpc and mpfr are required by the compiler
+(cc1plus links against libmpc/libmpfr), and haiku_devel provides the POSIX/OS
+development headers. Installing haiku_devel pulls a matching base-system update
+and requires a reboot to activate.
+
+Configure, build, and install into the Haiku non-packaged tree:
+
+    python3 ./waf configure --prefix=/boot/system/non-packaged
+    python3 ./waf build
+    python3 ./waf install
+
+Invoke waf as "python3 ./waf": Haiku ships python3, and the waf shebang's plain
+"python" is not present. Installing under /boot/system/non-packaged puts jackd and
+the tools on PATH, libjack on the default library search path, and the backend
+add-ons where jackd looks for them, so no JACK_DRIVER_DIR or LIBRARY_PATH tweaks
+are needed to run from the install tree.
+
+libsamplerate and libsndfile are optional and not required for the core server.
+
+
+Running
+-------
+
+    jackd -d hmulti -r 48000 -p 128
+
+Ports appear as system:capture_1/2 and system:playback_1/2. Connect clients with
+the usual tools, e.g.:
+
+    jack_metro --bpm 120 &
+    jack_connect metro:120_bpm system:playback_1
+    jack_connect metro:120_bpm system:playback_2
+
+Backend selection:
+
+    jackd -d hmulti   # hmulti_audio, low latency (recommended)
+    jackd -d haiku    # BSoundPlayer, through the system mixer
+    jackd -d dummy    # no hardware
+
+
+Media server handoff
+--------------------
+
+Haiku's media_server normally owns the audio hardware. When jackd opens the
+hmulti device and finds it busy, the hmulti backend automatically stops the media
+services (the same operation as "Restart Media Services" in Media preferences),
+takes exclusive control of the device, and restarts the media services when jackd
+exits.
+
+While JACK owns the card, Haiku's Media preferences mixer shows the output as not
+connected. This is expected: JACK holds the raw device, exactly as it does with
+ALSA on Linux. Any hardware mixer setup (input source, capture gain) must be done
+in Media preferences while jackd is not running; those codec settings persist when
+jackd takes the device.
+
+
+Known limitations
+-----------------
+
+- USB audio interfaces that use USB Audio Class 2.0 exposed as an Interface
+  Association Descriptor (device class 0xef) - which is how virtually all modern
+  class-compliant interfaces present - are not usable. Haiku's usb_audio kernel
+  driver enumerates them on the USB bus (they appear in listusb) but does not
+  publish an hmulti device node for them, so neither JACK nor the rest of the
+  system can use them. Confirmed with a Behringer UMC204HD (1397:0508) and an
+  XMOS-based NUX USB Audio 2.0 (20b1:2018). This is a limitation of Haiku's
+  usb_audio driver, not of this port; only the built-in HD Audio codec is usable
+  until that driver is extended. Extending usb_audio for UAC2/IAD devices is
+  tracked as future work.
+
+- Measuring round-trip latency with jack_iodelay requires a working analog
+  loopback (an output physically wired back to an input). On the built-in HDA
+  codec this depends on which physical output and input the codec has active,
+  configured through Media preferences. It is unrelated to the JACK backend.
+
+
+Roadmap
+-------
+
+- MIDI via the Haiku MIDI Kit.
+- Transport start/stop/reposition tests.
+- Robustness pass and the upstream JACK test suite on Haiku.
+- HaikuPorts recipe and submission upstream.
