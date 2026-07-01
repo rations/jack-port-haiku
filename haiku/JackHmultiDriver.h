@@ -79,7 +79,7 @@ private:
 
     int OpenDevice(const char* device);
     int DiscoverDevice(char* path, size_t size);
-    int SetupBuffers(jack_nframes_t buffer_size);
+    int SetupBuffers(jack_nframes_t buffer_size, int playback_channels, int capture_channels);
     void ZeroPlaybackBuffers();
     void UpdateLatencies();
 

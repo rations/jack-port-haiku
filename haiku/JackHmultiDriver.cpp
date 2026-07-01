@@ -197,21 +197,25 @@ int JackHmultiDriver::OpenDevice(const char* device)
     return 0;
 }
 
-int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size)
+int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size, int playback_channels, int capture_channels)
 {
     for (uint32 i = 0; i < HMULTI_MAX_BUFFERS; i++) {
         fPlayBuffers[i] = &fPlayBufferDescs[i * HMULTI_MAX_CHANNELS];
         fRecordBuffers[i] = &fRecordBufferDescs[i * HMULTI_MAX_CHANNELS];
     }
 
+    // Ask for the caller's period; the driver is free to return a different
+    // (typically fixed) buffer size, which the caller then adopts as the JACK
+    // period. Hardware that honours the request (e.g. hda) yields low latency;
+    // hardware that pins its DMA buffer (e.g. auich) dictates the period.
     memset(&fBufferList, 0, sizeof(fBufferList));
     fBufferList.info_size = sizeof(fBufferList);
     fBufferList.request_playback_buffers = HMULTI_MAX_BUFFERS;
-    fBufferList.request_playback_channels = fPlaybackChannels;
+    fBufferList.request_playback_channels = playback_channels;
     fBufferList.request_playback_buffer_size = buffer_size;
     fBufferList.playback_buffers = fPlayBuffers;
     fBufferList.request_record_buffers = HMULTI_MAX_BUFFERS;
-    fBufferList.request_record_channels = fCaptureChannels;
+    fBufferList.request_record_channels = capture_channels;
     fBufferList.request_record_buffer_size = buffer_size;
     fBufferList.record_buffers = fRecordBuffers;
 
@@ -221,7 +225,7 @@ int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size)
     }
 
     // Bounds-check what the driver returned before indexing the buffer arrays.
-    if (fBufferList.return_playback_buffers < 1 || fBufferList.return_playback_buffers > HMULTI_MAX_BUFFERS || fBufferList.return_record_buffers > HMULTI_MAX_BUFFERS || fBufferList.return_playback_channels < fPlaybackChannels || (fCaptureChannels > 0 && fBufferList.return_record_channels < fCaptureChannels)) {
+    if (fBufferList.return_playback_buffers < 1 || fBufferList.return_playback_buffers > HMULTI_MAX_BUFFERS || fBufferList.return_record_buffers > HMULTI_MAX_BUFFERS || fBufferList.return_playback_channels < playback_channels || (capture_channels > 0 && fBufferList.return_record_channels < capture_channels)) {
         jack_error("JackHmultiDriver: unexpected buffer geometry (pb %d x %d, rec %d x %d)",
                    (int)fBufferList.return_playback_buffers,
                    (int)fBufferList.return_playback_channels,
@@ -230,13 +234,14 @@ int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size)
         return -1;
     }
 
-    // One buffer exchange must equal exactly one JACK period. If the driver
-    // would not give us our period, fail loudly rather than silently glitch.
-    // TODO (Phase 3): on devices that only offer a fixed (larger) buffer,
-    // either drive multiple periods per exchange or adopt the device size.
-    if (fBufferList.return_playback_buffer_size != buffer_size) {
-        jack_error("JackHmultiDriver: device buffer size %u != requested period %u",
-                   (unsigned)fBufferList.return_playback_buffer_size, (unsigned)buffer_size);
+    // One buffer exchange drives exactly one JACK period, so capture and
+    // playback must share a single buffer size. JACK has one period for both
+    // directions; a device that offered different sizes could not be clocked
+    // coherently, so reject that rather than guess.
+    if (capture_channels > 0 && fBufferList.return_record_buffer_size != fBufferList.return_playback_buffer_size) {
+        jack_error("JackHmultiDriver: playback/record buffer sizes differ (%u vs %u)",
+                   (unsigned)fBufferList.return_playback_buffer_size,
+                   (unsigned)fBufferList.return_record_buffer_size);
         return -1;
     }
 
@@ -287,14 +292,6 @@ int JackHmultiDriver::Open(jack_nframes_t buffer_size,
         outchannels = 0;
     } else if (outchannels == 0 || outchannels > fDescription.output_channel_count) {
         outchannels = fDescription.output_channel_count;
-    }
-
-    if (JackAudioDriver::Open(buffer_size, samplerate, capturing, playing, inchannels, outchannels,
-                              monitor, capture_driver_name, playback_driver_name, capture_latency,
-                              playback_latency) != 0) {
-        close(fDevice);
-        fDevice = -1;
-        return -1;
     }
 
     // Verify the requested rate is one the device offers (never assume).
@@ -354,14 +351,33 @@ int JackHmultiDriver::Open(jack_nframes_t buffer_size,
         goto fail;
     }
 
-    if (SetupBuffers(buffer_size) != 0) {
+    // Set the DMA buffers up before registering with the engine: the device may
+    // pin its own buffer size, and that size (not the requested one) becomes the
+    // JACK period, since one buffer exchange clocks exactly one cycle.
+    if (SetupBuffers(buffer_size, outchannels, inchannels) != 0) {
         goto fail;
+    }
+
+    {
+        jack_nframes_t device_period = fBufferList.return_playback_buffer_size;
+        if (device_period != buffer_size) {
+            jack_info("JackHmultiDriver: device fixed the period at %u frames (requested %u); "
+                      "adopting the device buffer size",
+                      (unsigned)device_period, (unsigned)buffer_size);
+        }
+
+        // Register with the engine using the device's real period so the whole
+        // graph runs at the buffer size the hardware actually clocks.
+        if (JackAudioDriver::Open(device_period, samplerate, capturing, playing, inchannels,
+                                  outchannels, monitor, capture_driver_name, playback_driver_name,
+                                  capture_latency, playback_latency) != 0) {
+            goto fail;
+        }
     }
 
     return 0;
 
 fail:
-    JackAudioDriver::Close();
     close(fDevice);
     fDevice = -1;
     return -1;
