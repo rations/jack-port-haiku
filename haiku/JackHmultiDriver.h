@@ -77,10 +77,15 @@ private:
     // Playback cycle chosen by the most recent Read(); filled by Write().
     int32 fPlaybackCycle;
 
+    // True if Open() shut the media services down to take the device; Close()
+    // then relaunches them (see OpenDevice/RestoreMediaServer).
+    bool fMediaServerStopped;
+
     int OpenDevice(const char* device);
     int DiscoverDevice(char* path, size_t size);
     int SetupBuffers(jack_nframes_t buffer_size, int playback_channels, int capture_channels);
     void ZeroPlaybackBuffers();
+    void RestoreMediaServer();
     void UpdateLatencies();
 
 public:
@@ -89,7 +94,8 @@ public:
           fDevice(-1),
           fSampleFormat(0),
           fSampleBytes(0),
-          fPlaybackCycle(0)
+          fPlaybackCycle(0),
+          fMediaServerStopped(false)
     {
     }
     virtual ~JackHmultiDriver()

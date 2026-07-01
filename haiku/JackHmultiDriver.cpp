@@ -27,6 +27,10 @@ Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 #include "driver_interface.h"
 #include "memops.h"
 
+#include <MediaDefs.h>
+#include <MediaRoster.h>
+#include <OS.h>
+
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -39,6 +43,16 @@ namespace Jack
 {
 
 static const char* kHmultiRoot = "/dev/audio/hmulti";
+
+// shutdown_media_server()/launch_media_server() post a Deskbar progress
+// notification when no callback is supplied; that builds a BBitmap and needs an
+// app_server connection, which the headless jackd server does not have (it would
+// abort). Passing a no-op callback selects the non-notifying code path. Per the
+// Media Kit contract this callback must currently always return true.
+static bool media_progress_noop(int /*stage*/, const char* /*message*/, void* /*cookie*/)
+{
+    return true;
+}
 
 // Map a plain frame rate to the multi_audio single-bit rate selector. Returns 0
 // if the rate has no selector (caller must reject it rather than guess).
@@ -161,14 +175,26 @@ int JackHmultiDriver::OpenDevice(const char* device)
     // The reference multi_audio add-on opens the device O_WRONLY even for
     // duplex; record still flows through the buffer exchange.
     fDevice = open(path, O_WRONLY);
+    if (fDevice < 0 && BMediaRoster::IsRunning()) {
+        // The media services own the hmulti device exclusively (the multi_audio
+        // add-on opens it at boot), so the first open fails while they are up.
+        // Perform the standard, reversible handoff the Media preferences use:
+        // shut the media services down, take the device, and relaunch them in
+        // Close(). This mirrors stopping PulseAudio before starting JACK.
+        jack_info("JackHmultiDriver: %s is busy; handing it off from the media services", path);
+        if (shutdown_media_server(B_INFINITE_TIMEOUT, media_progress_noop, NULL) == B_OK) {
+            fMediaServerStopped = true;
+            // The device is released asynchronously as the add-on server exits,
+            // so retry the open briefly. Not the RT path, so snoozing is fine.
+            for (int i = 0; i < 20 && fDevice < 0; i++) {
+                snooze(50000);
+                fDevice = open(path, O_WRONLY);
+            }
+        }
+    }
     if (fDevice < 0) {
-        // The media_addon_server holds the device exclusively at boot, so this
-        // typically fails until those media services release it.
-        // TODO (Phase 3): coordinate the handoff (have the media add-on release
-        // the node) instead of requiring it to be stopped manually.
-        jack_error("JackHmultiDriver: cannot open %s: %s (is the device held by "
-                   "the media server?)",
-                   path, strerror(errno));
+        jack_error("JackHmultiDriver: cannot open %s: %s", path, strerror(errno));
+        RestoreMediaServer();
         return -1;
     }
     jack_info("JackHmultiDriver: opened %s", path);
@@ -181,20 +207,37 @@ int JackHmultiDriver::OpenDevice(const char* device)
     fDescription.channels = fChannelInfo;
     if (ioctl(fDevice, B_MULTI_GET_DESCRIPTION, &fDescription, sizeof(fDescription)) != 0) {
         jack_error("JackHmultiDriver: B_MULTI_GET_DESCRIPTION failed: %s", strerror(errno));
-        return -1;
+        goto fail;
     }
 
     // Validate the driver-reported channel counts before we rely on them.
     if (fDescription.output_channel_count < 0 || fDescription.input_channel_count < 0 || fDescription.output_channel_count + fDescription.input_channel_count > HMULTI_MAX_CHANNELS) {
         jack_error("JackHmultiDriver: device reports too many channels (out %d, in %d)",
                    (int)fDescription.output_channel_count, (int)fDescription.input_channel_count);
-        return -1;
+        goto fail;
     }
 
     jack_info("JackHmultiDriver: '%s' (%d out, %d in)", fDescription.friendly_name,
               (int)fDescription.output_channel_count, (int)fDescription.input_channel_count);
 
     return 0;
+
+fail:
+    close(fDevice);
+    fDevice = -1;
+    RestoreMediaServer();
+    return -1;
+}
+
+// Relaunch the media services if this driver stopped them in OpenDevice, so a
+// failed or closed session leaves the system's audio exactly as it found it.
+void JackHmultiDriver::RestoreMediaServer()
+{
+    if (fMediaServerStopped) {
+        jack_info("JackHmultiDriver: restarting media services");
+        launch_media_server(B_INFINITE_TIMEOUT, media_progress_noop, NULL);
+        fMediaServerStopped = false;
+    }
 }
 
 int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size, int playback_channels, int capture_channels)
@@ -380,6 +423,7 @@ int JackHmultiDriver::Open(jack_nframes_t buffer_size,
 fail:
     close(fDevice);
     fDevice = -1;
+    RestoreMediaServer();
     return -1;
 }
 
@@ -391,7 +435,9 @@ int JackHmultiDriver::Close()
         close(fDevice);
         fDevice = -1;
     }
-    // TODO (Phase 3): restore the media services we displaced in Open().
+    // Relaunch the media services only after our handle is closed, so the
+    // add-on server can reclaim the device.
+    RestoreMediaServer();
     return res;
 }
 

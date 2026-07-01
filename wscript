@@ -888,7 +888,7 @@ def build_drivers(bld):
             bld,
             target='hmulti',
             source=hmulti_src,
-            use=['HMULTI'])
+            use=['HMULTI', 'MEDIA', 'BE'])
 
     if bld.env['IS_FREEBSD']:
         create_driver_obj(
