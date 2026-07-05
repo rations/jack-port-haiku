@@ -102,6 +102,13 @@ static uint32 select_format(uint32 mask)
     if (mask & B_FMT_32BIT) {
         return B_FMT_32BIT;
     }
+    // 24-bit samples travel MSB-justified in a 32-bit container: the
+    // multi_audio contract maps B_FMT_24BIT to B_AUDIO_INT with 24 valid
+    // bits, and USB Audio Type I subslots are left-justified. This is the
+    // same layout as the memops "d32u24" converters.
+    if (mask & B_FMT_24BIT) {
+        return B_FMT_24BIT;
+    }
     if (mask & B_FMT_16BIT) {
         return B_FMT_16BIT;
     }
@@ -112,6 +119,7 @@ static size_t format_bytes(uint32 format)
 {
     switch (format) {
     case B_FMT_32BIT:
+    case B_FMT_24BIT:
         return 4;
     case B_FMT_16BIT:
         return 2;
@@ -253,11 +261,11 @@ int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size, int playback_chan
     // hardware that pins its DMA buffer (e.g. auich) dictates the period.
     memset(&fBufferList, 0, sizeof(fBufferList));
     fBufferList.info_size = sizeof(fBufferList);
-    fBufferList.request_playback_buffers = HMULTI_MAX_BUFFERS;
+    fBufferList.request_playback_buffers = fRequestedBuffers;
     fBufferList.request_playback_channels = playback_channels;
     fBufferList.request_playback_buffer_size = buffer_size;
     fBufferList.playback_buffers = fPlayBuffers;
-    fBufferList.request_record_buffers = HMULTI_MAX_BUFFERS;
+    fBufferList.request_record_buffers = fRequestedBuffers;
     fBufferList.request_record_channels = capture_channels;
     fBufferList.request_record_buffer_size = buffer_size;
     fBufferList.record_buffers = fRecordBuffers;
@@ -471,30 +479,46 @@ int JackHmultiDriver::Read()
 {
     // Blocks until the next DMA swap: this is what paces the JACK graph.
     if (ioctl(fDevice, B_MULTI_BUFFER_EXCHANGE, &fBufferInfo, sizeof(fBufferInfo)) != 0) {
-        jack_error("JackHmultiDriver: B_MULTI_BUFFER_EXCHANGE failed: %s", strerror(errno));
+        // A signal interrupting the blocking exchange means the server is
+        // shutting the thread down, not that the device failed.
+        if (errno == B_INTERRUPTED) {
+            jack_log("JackHmultiDriver: buffer exchange interrupted, stopping");
+        } else {
+            jack_error("JackHmultiDriver: B_MULTI_BUFFER_EXCHANGE failed: %s", strerror(errno));
+        }
         return -1;
     }
 
     JackDriver::CycleIncTime();
 
     const jack_nframes_t frames = fEngineControl->fBufferSize;
-    const int32 buffers = fBufferList.return_playback_buffers;
 
-    // Fill the buffer behind the one the driver just reported (the slot it has
-    // finished with), mirroring the multi_audio reference.
-    // TODO (Phase 3): verify this index choice empirically against latency.
-    fPlaybackCycle = (fBufferInfo.playback_buffer_cycle - 1 + buffers) % buffers;
+    // Buffer-cycle convention, verified empirically on usb_audio (hardware
+    // loopback + jack_iodelay, which reads garbage/zero if this is wrong):
+    // the kernel completion handler releases the ready-semaphore, then
+    // advances its current buffer and queues the next transfer. So at exchange
+    // return, record_buffer_cycle is the buffer the hardware just finished
+    // filling (freshest capture -- read it directly), while the playback slot
+    // safe to write is the one behind the reported cycle (the reported one is
+    // already in flight to the hardware).
+    const int32 playBuffers = fBufferList.return_playback_buffers;
+    if (fBufferInfo.playback_buffer_cycle >= 0 && fBufferInfo.playback_buffer_cycle < playBuffers) {
+        fPlaybackCycle = (fBufferInfo.playback_buffer_cycle - 1 + playBuffers) % playBuffers;
+    }
 
     // Pull captured audio for this cycle into the JACK input ports.
     if (fCaptureChannels > 0) {
+        const int32 recBuffers = fBufferList.return_record_buffers;
         int32 recCycle = fBufferInfo.record_buffer_cycle;
-        if (recCycle >= 0 && recCycle < fBufferList.return_record_buffers) {
+        if (recCycle >= 0 && recCycle < recBuffers) {
             for (int c = 0; c < fCaptureChannels; c++) {
                 char* src = fBufferList.record_buffers[recCycle][c].base;
                 size_t stride = fBufferList.record_buffers[recCycle][c].stride;
                 jack_default_audio_sample_t* dst = GetInputBuffer(c);
                 if (fSampleFormat == B_FMT_16BIT) {
                     sample_move_dS_s16(dst, src, frames, stride);
+                } else if (fSampleFormat == B_FMT_24BIT) {
+                    sample_move_dS_s32u24(dst, src, frames, stride);
                 } else {
                     sample_move_dS_s32(dst, src, frames, stride);
                 }
@@ -515,6 +539,8 @@ int JackHmultiDriver::Write()
         jack_default_audio_sample_t* src = GetOutputBuffer(c);
         if (fSampleFormat == B_FMT_16BIT) {
             sample_move_d16_sS(dst, src, frames, stride, NULL);
+        } else if (fSampleFormat == B_FMT_24BIT) {
+            sample_move_d32u24_sS(dst, src, frames, stride, NULL);
         } else {
             sample_move_d32_sS(dst, src, frames, stride, NULL);
         }
@@ -566,6 +592,9 @@ SERVER_EXPORT jack_driver_desc_t* driver_get_descriptor()
     value.ui = 1024U;
     jack_driver_descriptor_add_parameter(desc, &filler, "period", 'p', JackDriverParamUInt, &value, NULL, "Frames per period", NULL);
 
+    value.ui = 8U;
+    jack_driver_descriptor_add_parameter(desc, &filler, "nperiods", 'n', JackDriverParamUInt, &value, NULL, "Number of periods (buffers) to request; device may override", NULL);
+
     value.i = 1;
     jack_driver_descriptor_add_parameter(desc, &filler, "capture", 'C', JackDriverParamBool, &value, NULL, "Enable capture", NULL);
     jack_driver_descriptor_add_parameter(desc, &filler, "playback", 'P', JackDriverParamBool, &value, NULL, "Enable playback", NULL);
@@ -580,6 +609,7 @@ SERVER_EXPORT Jack::JackDriverClientInterface* driver_initialize(Jack::JackLocke
 {
     jack_nframes_t srate = 48000;
     jack_nframes_t frames_per_interrupt = 1024;
+    int nperiods = HMULTI_MAX_BUFFERS;
     int chan_in = 0;
     int chan_out = 0;
     bool capture = true;
@@ -609,6 +639,10 @@ SERVER_EXPORT Jack::JackDriverClientInterface* driver_initialize(Jack::JackLocke
             frames_per_interrupt = (unsigned int)param->value.ui;
             break;
 
+        case 'n':
+            nperiods = (int)param->value.ui;
+            break;
+
         case 'C':
             capture = param->value.i;
             break;
@@ -624,6 +658,7 @@ SERVER_EXPORT Jack::JackDriverClientInterface* driver_initialize(Jack::JackLocke
     }
 
     Jack::JackHmultiDriver* hmulti_driver = new Jack::JackHmultiDriver("system", "hmulti", engine, table);
+    hmulti_driver->SetRequestedBuffers(nperiods);
     Jack::JackDriverClientInterface* threaded_driver = new Jack::JackThreadedDriver(hmulti_driver);
     if (hmulti_driver->Open(frames_per_interrupt, srate, capture, playback, chan_in, chan_out, false,
                             device, device, 0, 0) == 0) {

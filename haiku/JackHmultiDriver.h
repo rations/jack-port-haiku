@@ -77,6 +77,10 @@ private:
     // Playback cycle chosen by the most recent Read(); filled by Write().
     int32 fPlaybackCycle;
 
+    // Buffer (period) count requested from the device; the device may return
+    // a different count, which SetupBuffers adopts after bounds-checking.
+    int32 fRequestedBuffers;
+
     // True if Open() shut the media services down to take the device; Close()
     // then relaunches them (see OpenDevice/RestoreMediaServer).
     bool fMediaServerStopped;
@@ -95,11 +99,24 @@ public:
           fSampleFormat(0),
           fSampleBytes(0),
           fPlaybackCycle(0),
+          fRequestedBuffers(HMULTI_MAX_BUFFERS),
           fMediaServerStopped(false)
     {
     }
     virtual ~JackHmultiDriver()
     {
+    }
+
+    // Must be called before Open; clamped to [2, HMULTI_MAX_BUFFERS].
+    void SetRequestedBuffers(int32 buffers)
+    {
+        if (buffers < 2) {
+            buffers = 2;
+        }
+        if (buffers > HMULTI_MAX_BUFFERS) {
+            buffers = HMULTI_MAX_BUFFERS;
+        }
+        fRequestedBuffers = buffers;
     }
 
     int Open(jack_nframes_t buffer_size,
