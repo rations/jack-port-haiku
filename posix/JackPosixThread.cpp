@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 #include "JackError.h"
 #include "JackTime.h"
 #include "JackGlobals.h"
+#include <signal.h>
 #include <string.h> // for memset
 #include <unistd.h> // for _POSIX_PRIORITY_SCHEDULING check
 
@@ -60,6 +61,17 @@ void* JackPosixThread::ThreadHandler(void* arg)
     JackPosixThread* obj = (JackPosixThread*)arg;
     JackRunnableInterface* runnable = obj->fRunnable;
     int err;
+
+    /* Block async signals: POSIX allows a process-directed signal to be
+       delivered to any thread that does not block it. If it is delivered to
+       an internal JACK thread and the application's handler then calls
+       jack_client_close(), the close runs on the very thread it needs to
+       cancel and join, deadlocking the process. Masking here forces delivery
+       to an application thread. Cancellation is unaffected: implementations
+       deliver pthread_cancel() through a signal that cannot be blocked. */
+    sigset_t set;
+    sigfillset(&set);
+    pthread_sigmask(SIG_BLOCK, &set, NULL);
 
     if ((err = pthread_setcanceltype(obj->fCancellation, NULL)) != 0) {
         jack_error("pthread_setcanceltype err = %s", strerror(err));
@@ -199,6 +211,17 @@ int JackPosixThread::Kill()
 {
     if (fThread != (jack_native_thread_t)NULL) { // If thread has been started
         jack_log("JackPosixThread::Kill");
+        if (pthread_equal(pthread_self(), fThread)) {
+            /* Called from the thread itself (e.g. jack_client_close() on this
+               thread): a self pthread_cancel() would kill the thread at the
+               next cancellation point in the middle of the caller's cleanup.
+               Skip it and let the caller finish; the thread exits when the
+               caller returns. */
+            jack_error("JackPosixThread::Kill from thread itself, skipped");
+            fStatus = kIdle;
+            fThread = (jack_native_thread_t)NULL;
+            return 0;
+        }
         void* status;
         pthread_cancel(fThread);
         pthread_join(fThread, &status);

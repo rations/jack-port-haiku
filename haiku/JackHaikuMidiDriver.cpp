@@ -159,44 +159,56 @@ int JackHaikuMidiDriver::Open(bool capturing,
     int32 id;
     char name[REAL_JACK_PORT_NAME_SIZE + 1];
 
-    // Every remote producer endpoint (a hardware MIDI input published by the
-    // midi_server, e.g. usb_midi ports) becomes a JACK capture port.
-    id = 0;
-    BMidiProducer* producer;
-    while ((producer = BMidiRoster::NextProducer(&id)) != NULL && num_inputs < HAIKU_MIDI_MAX_PORTS) {
-        if (!producer->IsRemote() || !producer->IsValid()) {
-            producer->Release();
-            continue;
-        }
-        snprintf(name, sizeof(name), "jack_midi in: %s", producer->Name());
-        JackHaikuMidiInput* input = new JackHaikuMidiInput(name, producer);
-        if (!input->IsOk() || producer->Connect(input) != B_OK) {
-            jack_error("JackHaikuMidiDriver: cannot connect to '%s'", producer->Name());
-            input->Release(); // BMidiLocalConsumer is reference counted
-            continue;
-        }
-        jack_info("JackHaikuMidiDriver: capture %d <- '%s'", num_inputs + 1, producer->Name());
-        fInputs[num_inputs++] = input;
-    }
+    // The midi_server is launched on demand and scans /dev/midi
+    // asynchronously, so enumerating right after it starts (e.g. on the first
+    // jackd run after boot) can find nothing even though devices are present.
+    // Retry briefly before concluding there are no devices.
+    for (int attempt = 0;; attempt++) {
 
-    // Every remote consumer endpoint (a hardware MIDI output) becomes a JACK
-    // playback port.
-    id = 0;
-    BMidiConsumer* consumer;
-    while ((consumer = BMidiRoster::NextConsumer(&id)) != NULL && num_outputs < HAIKU_MIDI_MAX_PORTS) {
-        if (!consumer->IsRemote() || !consumer->IsValid()) {
-            consumer->Release();
-            continue;
+        // Every remote producer endpoint (a hardware MIDI input published by
+        // the midi_server, e.g. usb_midi ports) becomes a JACK capture port.
+        id = 0;
+        BMidiProducer* producer;
+        while ((producer = BMidiRoster::NextProducer(&id)) != NULL && num_inputs < HAIKU_MIDI_MAX_PORTS) {
+            if (!producer->IsRemote() || !producer->IsValid()) {
+                producer->Release();
+                continue;
+            }
+            snprintf(name, sizeof(name), "jack_midi in: %s", producer->Name());
+            JackHaikuMidiInput* input = new JackHaikuMidiInput(name, producer);
+            if (!input->IsOk() || producer->Connect(input) != B_OK) {
+                jack_error("JackHaikuMidiDriver: cannot connect to '%s'", producer->Name());
+                input->Release(); // BMidiLocalConsumer is reference counted
+                continue;
+            }
+            jack_info("JackHaikuMidiDriver: capture %d <- '%s'", num_inputs + 1, producer->Name());
+            fInputs[num_inputs++] = input;
         }
-        snprintf(name, sizeof(name), "jack_midi out: %s", consumer->Name());
-        JackHaikuMidiOutput* output = new JackHaikuMidiOutput(name, consumer);
-        if (!output->IsOk()) {
-            jack_error("JackHaikuMidiDriver: cannot connect to '%s'", consumer->Name());
-            delete output;
-            continue;
+
+        // Every remote consumer endpoint (a hardware MIDI output) becomes a
+        // JACK playback port.
+        id = 0;
+        BMidiConsumer* consumer;
+        while ((consumer = BMidiRoster::NextConsumer(&id)) != NULL && num_outputs < HAIKU_MIDI_MAX_PORTS) {
+            if (!consumer->IsRemote() || !consumer->IsValid()) {
+                consumer->Release();
+                continue;
+            }
+            snprintf(name, sizeof(name), "jack_midi out: %s", consumer->Name());
+            JackHaikuMidiOutput* output = new JackHaikuMidiOutput(name, consumer);
+            if (!output->IsOk()) {
+                jack_error("JackHaikuMidiDriver: cannot connect to '%s'", consumer->Name());
+                delete output;
+                continue;
+            }
+            jack_info("JackHaikuMidiDriver: playback %d -> '%s'", num_outputs + 1, consumer->Name());
+            fOutputs[num_outputs++] = output;
         }
-        jack_info("JackHaikuMidiDriver: playback %d -> '%s'", num_outputs + 1, consumer->Name());
-        fOutputs[num_outputs++] = output;
+
+        if (num_inputs + num_outputs > 0 || attempt >= 9) {
+            break;
+        }
+        snooze(300000); // wait for the midi_server device scan, 3 s at most
     }
 
     if (num_inputs == 0 && num_outputs == 0) {
