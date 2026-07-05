@@ -394,6 +394,8 @@ def configure(conf):
         # BApplication/BLooper machinery it depends on (libbe).
         conf.env['LIB_MEDIA'] = ['media']
         conf.env['LIB_BE'] = ['be']
+        # The MIDI backend bridges the midi2 kit (BMidiRoster endpoints).
+        conf.env['LIB_MIDI2'] = ['midi2']
         # The hmulti_audio backend uses the kernel audio driver contract, which
         # ships as a private (non-default) development header. Locate it with
         # findpaths so the build does not hard-code an install location.
@@ -746,6 +748,10 @@ def build_drivers(bld):
         'common/memops.c'
     ]
 
+    haikumidi_src = [
+        'haiku/JackHaikuMidiDriver.cpp'
+    ]
+
     coremidi_src = [
         'macosx/coremidi/JackCoreMidiInputPort.mm',
         'macosx/coremidi/JackCoreMidiOutputPort.mm',
@@ -889,6 +895,11 @@ def build_drivers(bld):
             target='hmulti',
             source=hmulti_src,
             use=['HMULTI', 'MEDIA', 'BE'])
+        create_driver_obj(
+            bld,
+            target='haikumidi',
+            source=haikumidi_src,
+            use=['MIDI2', 'BE'])
 
     if bld.env['IS_FREEBSD']:
         create_driver_obj(

@@ -38,3 +38,6 @@ haiku-r1beta5-x86_64-anyboot.iso
 *.iso
 *.qcow2
 *.img
+
+# Local dev probes (not part of the build or upstream submission)
+haiku/probes/
