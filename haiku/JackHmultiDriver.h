@@ -77,6 +77,11 @@ private:
     // Playback cycle chosen by the most recent Read(); filled by Write().
     int32 fPlaybackCycle;
 
+    // The buffer cycle processed by the previous Read(), used to collapse the
+    // duplicate buffer-exchange returns a duplex device produces (one per
+    // stream) into a single JACK cycle per period. -1 until the first Read().
+    int32 fLastExchangeCycle;
+
     // Buffer (period) count requested from the device; the device may return
     // a different count, which SetupBuffers adopts after bounds-checking.
     int32 fRequestedBuffers;
@@ -99,6 +104,7 @@ public:
           fSampleFormat(0),
           fSampleBytes(0),
           fPlaybackCycle(0),
+          fLastExchangeCycle(-1),
           fRequestedBuffers(HMULTI_MAX_BUFFERS),
           fMediaServerStopped(false)
     {

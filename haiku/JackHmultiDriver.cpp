@@ -463,6 +463,7 @@ int JackHmultiDriver::Start()
     memset(&fBufferInfo, 0, sizeof(fBufferInfo));
     fBufferInfo.info_size = sizeof(fBufferInfo);
     fPlaybackCycle = 0;
+    fLastExchangeCycle = -1;
     return 0;
 }
 
@@ -477,16 +478,35 @@ int JackHmultiDriver::Stop()
 
 int JackHmultiDriver::Read()
 {
-    // Blocks until the next DMA swap: this is what paces the JACK graph.
-    if (ioctl(fDevice, B_MULTI_BUFFER_EXCHANGE, &fBufferInfo, sizeof(fBufferInfo)) != 0) {
-        // A signal interrupting the blocking exchange means the server is
-        // shutting the thread down, not that the device failed.
-        if (errno == B_INTERRUPTED) {
-            jack_log("JackHmultiDriver: buffer exchange interrupted, stopping");
-        } else {
-            jack_error("JackHmultiDriver: B_MULTI_BUFFER_EXCHANGE failed: %s", strerror(errno));
+    // Each B_MULTI_BUFFER_EXCHANGE blocks until a stream completion posts the
+    // device's ready-semaphore. A duplex device runs two streams (playback and
+    // record), and every period each one completes and posts the semaphore
+    // independently, so a single period yields *two* exchange returns. Running
+    // the JACK graph on both would clock it at twice the real sample rate
+    // (audible as 2x-fast, glitchy playback). Advance one JACK cycle per period
+    // by looping until the buffer we pace on actually changes -- the same
+    // deduplication the reference multi_audio media node performs. Pace on the
+    // playback cycle when playing, otherwise on the record cycle (capture-only),
+    // so the loop always tracks a stream that is actually running.
+    for (;;) {
+        if (ioctl(fDevice, B_MULTI_BUFFER_EXCHANGE, &fBufferInfo, sizeof(fBufferInfo)) != 0) {
+            // A signal interrupting the blocking exchange means the server is
+            // shutting the thread down, not that the device failed.
+            if (errno == B_INTERRUPTED) {
+                jack_log("JackHmultiDriver: buffer exchange interrupted, stopping");
+            } else {
+                jack_error("JackHmultiDriver: B_MULTI_BUFFER_EXCHANGE failed: %s", strerror(errno));
+            }
+            return -1;
         }
-        return -1;
+        int32 cycle = (fPlaybackChannels > 0) ? fBufferInfo.playback_buffer_cycle
+                                              : fBufferInfo.record_buffer_cycle;
+        if (cycle != fLastExchangeCycle) {
+            fLastExchangeCycle = cycle;
+            break;
+        }
+        // Duplicate completion from the other stream in the same period: consume
+        // its semaphore post and wait for the next period rather than double-run.
     }
 
     JackDriver::CycleIncTime();
