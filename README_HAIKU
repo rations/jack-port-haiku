@@ -102,8 +102,9 @@ Known limitations
   system can use them. Confirmed with a Behringer UMC204HD (1397:0508) and an
   XMOS-based NUX USB Audio 2.0 (20b1:2018). This is a limitation of Haiku's
   usb_audio driver, not of this port; only the built-in HD Audio codec is usable
-  until that driver is extended. Extending usb_audio for UAC2/IAD devices is
-  tracked as future work.
+  with a stock system. A companion UAC2 driver (the haiku-kernel-usb project,
+  branch usb-audio-uac2) removes this limitation: with it installed, class-
+  compliant UAC2 interfaces are published as hmulti devices and JACK can use them.
 
 - Measuring round-trip latency with jack_iodelay requires a working analog
   loopback (an output physically wired back to an input). On the built-in HDA
@@ -111,10 +112,29 @@ Known limitations
   configured through Media preferences. It is unrelated to the JACK backend.
 
 
+Installation
+------------
+
+Two ways to install, both native on Haiku (x86_64):
+
+- Prebuilt package: build the .hpkg once with `packaging/make-hpkg.sh`, then on any
+  tester machine `pkgman install ./jack-1.9.23-1-x86_64.hpkg` (it pulls no external
+  dependencies — everything it needs is in the base system).
+- From source: `./build-from-source.sh` installs jackd + libjack into
+  /boot/system/non-packaged (the manual Building steps above, wrapped with the
+  pkgman prerequisites).
+
+A HaikuPorts recipe is in `packaging/jack-1.9.23.recipe` (validate with
+`haikuporter -c jack` before use).
+
+This is the base of the JackDAW audio stack. If you use a USB audio interface, install
+the companion UAC2 driver first (haiku-kernel-usb); then this JACK server, then the
+plugins and the JackDAW DAW.
+
 Roadmap
 -------
 
 - MIDI via the Haiku MIDI Kit.
 - Transport start/stop/reposition tests.
 - Robustness pass and the upstream JACK test suite on Haiku.
-- HaikuPorts recipe and submission upstream.
+- HaikuPorts recipe and submission upstream (recipe drafted in packaging/).

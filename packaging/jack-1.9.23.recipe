@@ -1,0 +1,51 @@
+# HaikuPorts recipe for the native Haiku JACK2 port.
+#
+# NOT YET VALIDATED with haikuporter — verify on the target with `haikuporter -c jack`
+# before relying on it. Two things to finish:
+#   1. Pin SOURCE_URI to a tag or commit (not a moving branch) and add its CHECKSUM,
+#      or keep the git+ form below and let haikuporter fetch the pinned rev.
+#   2. Confirm the BUILD_REQUIRES package names exist in the HaikuPorts x86_64 repo
+#      (pkgman search <name>); the mpc/mpfr/pkgconfig provider names vary.
+SUMMARY="JACK2 low-latency audio server (native Haiku port)"
+DESCRIPTION="A native Haiku port of JACK2 (jackd2), the low-latency audio server, with a \
+Media Kit based backend. Includes jackd, libjack/libjackserver, the dummy/haiku/hmulti \
+audio backends and the haikumidi MIDI slave, and the standard JACK example tools."
+HOMEPAGE="https://github.com/rations/jack-port-haiku"
+COPYRIGHT="2001-2024 Paul Davis, Stephane Letz and the JACK developers"
+LICENSE="GNU GPL v2
+	GNU LGPL v2.1"
+REVISION="1"
+SOURCE_URI="git+https://github.com/rations/jack-port-haiku#master"
+SOURCE_DIR="jack-port-haiku"
+ARCHITECTURES="x86_64"
+
+PROVIDES="
+	jack = 1.9.23
+	cmd:jackd = 1.9.23
+	lib:libjack = 1.9.23
+	lib:libjackserver = 1.9.23
+	devel:libjack = 1.9.23
+	"
+REQUIRES="
+	haiku
+	"
+BUILD_REQUIRES="
+	haiku_devel
+	cmd:pkg_config
+	cmd:python3
+	"
+BUILD_PREREQUISITES="
+	cmd:gcc
+	cmd:make
+	"
+
+BUILD()
+{
+	python3 ./waf configure --prefix=$prefix
+	python3 ./waf build $jobArgs
+}
+
+INSTALL()
+{
+	python3 ./waf install --destdir=$installDestDir
+}

@@ -1,0 +1,31 @@
+name			jack
+version			1.9.23-1
+architecture	x86_64
+summary			"JACK2 low-latency audio server (native Haiku port)"
+description		"A native Haiku port of JACK2 (jackd2), the low-latency audio server,
+with a Media Kit based backend. Includes the jackd server, libjack/libjackserver,
+the dummy/haiku/hmulti audio backends and the haikumidi MIDI slave, and the standard
+JACK example tools. This is the audio backend used by the JackDAW DAW and the rest of
+the JACK-on-Haiku stack."
+packager		"rations <ehqcar@proton.me>"
+vendor			"rations"
+copyrights {
+	"2001-2024 Paul Davis, Stephane Letz and the JACK developers"
+}
+licenses {
+	"GNU GPL v2"
+	"GNU LGPL v2.1"
+}
+provides {
+	jack = 1.9.23
+	cmd:jackd = 1.9.23
+	lib:libjack = 1.9.23
+	lib:libjackserver = 1.9.23
+	devel:libjack = 1.9.23
+}
+requires {
+	haiku
+}
+urls {
+	"https://github.com/rations/jack-port-haiku"
+}
