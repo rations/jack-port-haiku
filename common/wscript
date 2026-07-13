@@ -439,6 +439,16 @@ def build(bld):
             ]
             netlib.env.append_value('CPPFLAGS', '-fvisibility=hidden')
 
+        if bld.env['IS_HAIKU']:
+            netlib.source += [
+                '../posix/JackNetUnixSocket.cpp',
+                '../posix/JackPosixThread.cpp',
+                '../posix/JackPosixMutex.cpp',
+                '../posix/JackPosixTime.c',
+            ]
+            netlib.use += ['NETWORK']
+            netlib.env.append_value('CPPFLAGS', '-fvisibility=hidden')
+
         if bld.env['IS_FREEBSD']:
             netlib.source += [
                 '../posix/JackNetUnixSocket.cpp',
