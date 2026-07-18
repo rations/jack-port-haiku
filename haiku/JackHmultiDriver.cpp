@@ -265,7 +265,14 @@ int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size, int playback_chan
     fBufferList.request_playback_channels = playback_channels;
     fBufferList.request_playback_buffer_size = buffer_size;
     fBufferList.playback_buffers = fPlayBuffers;
-    fBufferList.request_record_buffers = fRequestedBuffers;
+    // Request the full ring for the record direction regardless of the
+    // period count: record buffers fill continuously at the device's own
+    // clock, so the sequential read cursor needs ring slack to absorb the
+    // periods in which two buffers complete (clock drift) or completions
+    // arrive reordered. Ring depth is overwrite slack, not latency -- the
+    // cursor reads right behind the fill frontier; we always allocate
+    // HMULTI_MAX_BUFFERS descriptor rows, so the driver may return that many.
+    fBufferList.request_record_buffers = HMULTI_MAX_BUFFERS;
     fBufferList.request_record_channels = capture_channels;
     fBufferList.request_record_buffer_size = buffer_size;
     fBufferList.record_buffers = fRecordBuffers;
@@ -462,8 +469,14 @@ int JackHmultiDriver::Start()
 
     memset(&fBufferInfo, 0, sizeof(fBufferInfo));
     fBufferInfo.info_size = sizeof(fBufferInfo);
+    // The driver only writes a stream's cycle field when that stream's buffer
+    // is exchanged; prime both with an invalid index so the range checks in
+    // Read() reject them until the first real exchange (0 would pass).
+    fBufferInfo.playback_buffer_cycle = -1;
+    fBufferInfo.record_buffer_cycle = -1;
     fPlaybackCycle = 0;
     fLastExchangeCycle = -1;
+    fRecordReadCycle = -1;
     return 0;
 }
 
@@ -518,19 +531,53 @@ int JackHmultiDriver::Read()
     // the kernel completion handler releases the ready-semaphore, then
     // advances its current buffer and queues the next transfer. So at exchange
     // return, record_buffer_cycle is the buffer the hardware just finished
-    // filling (freshest capture -- read it directly), while the playback slot
-    // safe to write is the one behind the reported cycle (the reported one is
-    // already in flight to the hardware).
+    // filling (freshest capture -- consumed via the sequential cursor below),
+    // while the playback slot safe to write is the one behind the reported
+    // cycle (the reported one is already in flight to the hardware).
     const int32 playBuffers = fBufferList.return_playback_buffers;
     if (fBufferInfo.playback_buffer_cycle >= 0 && fBufferInfo.playback_buffer_cycle < playBuffers) {
         fPlaybackCycle = (fBufferInfo.playback_buffer_cycle - 1 + playBuffers) % playBuffers;
     }
 
     // Pull captured audio for this cycle into the JACK input ports.
+    //
+    // Capture is read sequentially from our own cursor, not from the reported
+    // cycle. The reported record_buffer_cycle is the *freshest* filled buffer,
+    // and a driver that paces capture on the device's own clock (usb_audio
+    // with its continuous record fill) occasionally completes two record
+    // buffers in one period -- reading only the freshest would skip one whole
+    // period of audio at every such burst (an audible click that produces no
+    // xrun). Long-term the fill rate and the playback rate we pace on are the
+    // same clock, so a cursor advancing one buffer per cycle stays in sync;
+    // the transient bursts are absorbed by the buffer ring. Two guards handle
+    // the edges: if the cursor would pass the freshest filled buffer (a period
+    // that produced no new capture buffer), the previous buffer is re-read
+    // rather than reading unwritten data; if it falls so far behind that the
+    // writer is about to lap it, it snaps forward to the freshest buffer.
     if (fCaptureChannels > 0) {
         const int32 recBuffers = fBufferList.return_record_buffers;
-        int32 recCycle = fBufferInfo.record_buffer_cycle;
-        if (recCycle >= 0 && recCycle < recBuffers) {
+        int32 latest = fBufferInfo.record_buffer_cycle;
+        if (latest >= 0 && latest < recBuffers) {
+            int32 recCycle;
+            if (fRecordReadCycle < 0) {
+                // Start the cursor one buffer behind the freshest: the driver
+                // serves record buffers first, so the reported cycle is at
+                // most one fill behind the frontier (a two-buffer completion
+                // burst); one buffer of cushion absorbs that without tripping
+                // the hold guard into an audible duplicate mid-stream. The
+                // cushioned pre-start buffer reads as silence and costs one
+                // period of capture latency.
+                recCycle = (latest - recBuffers / 8 + recBuffers) % recBuffers;
+            } else {
+                recCycle = (fRecordReadCycle + 1) % recBuffers;
+                int32 ahead = (latest - recCycle + recBuffers) % recBuffers;
+                if (ahead == recBuffers - 1) {
+                    recCycle = fRecordReadCycle;
+                } else if (ahead >= recBuffers / 2) {
+                    recCycle = latest;
+                }
+            }
+            fRecordReadCycle = recCycle;
             for (int c = 0; c < fCaptureChannels; c++) {
                 char* src = fBufferList.record_buffers[recCycle][c].base;
                 size_t stride = fBufferList.record_buffers[recCycle][c].stride;

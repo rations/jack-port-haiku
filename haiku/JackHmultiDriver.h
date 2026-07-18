@@ -82,6 +82,13 @@ private:
     // stream) into a single JACK cycle per period. -1 until the first Read().
     int32 fLastExchangeCycle;
 
+    // The record buffer read by the previous Read(). Capture is consumed
+    // sequentially from this cursor, not from the reported (freshest) cycle:
+    // a device-clocked driver occasionally completes two record buffers in
+    // one period (or none), and reading only the freshest would skip one
+    // buffer of audio at each such burst. -1 until the first capture read.
+    int32 fRecordReadCycle;
+
     // Buffer (period) count requested from the device; the device may return
     // a different count, which SetupBuffers adopts after bounds-checking.
     int32 fRequestedBuffers;
@@ -105,6 +112,7 @@ public:
           fSampleBytes(0),
           fPlaybackCycle(0),
           fLastExchangeCycle(-1),
+          fRecordReadCycle(-1),
           fRequestedBuffers(HMULTI_MAX_BUFFERS),
           fMediaServerStopped(false)
     {

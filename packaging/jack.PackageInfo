@@ -1,5 +1,5 @@
 name			jack
-version			1.9.23-1
+version			1.9.23-4
 architecture	x86_64
 summary			"JACK2 low-latency audio server (native Haiku port)"
 description		"A native Haiku port of JACK2 (jackd2), the low-latency audio server,
