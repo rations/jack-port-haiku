@@ -15,7 +15,12 @@ STAGE="$HERE/stage"
 # the base develop headers.
 pkgman install -y gcc make pkgconfig mpc mpfr haiku_devel || true
 
-rm -rf "$STAGE"
+# Always build from scratch. waf builds incrementally, so without this the
+# package would be assembled from whatever happens to be in build/ -- which is
+# not necessarily the checked-out source. Sources arriving by rsync keep their
+# origin mtimes, so a build tree can also look newer than sources that are in
+# fact more recent. A release artifact must not depend on either.
+rm -rf "$STAGE" build
 cd "$ROOT"
 
 # Configure with the PACKAGED prefix, then stage the install under $STAGE via

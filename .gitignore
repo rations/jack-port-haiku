@@ -41,3 +41,7 @@ haiku-r1beta5-x86_64-anyboot.iso
 
 # Local dev probes (not part of the build or upstream submission)
 haiku/probes/
+
+# Built packages: attached to GitHub Releases, never committed.
+packaging/*.hpkg
+packaging/stage/
