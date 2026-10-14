@@ -9,7 +9,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 VERSION=1.9.23
-REVISION=5
+REVISION=6
 STAGE="$HERE/stage"
 
 # Build prerequisites (idempotent). A minimal Haiku lacks mpc/mpfr (compiler) and
@@ -26,7 +26,17 @@ cd "$ROOT"
 
 # Configure with the PACKAGED prefix, then stage the install under $STAGE via
 # waf's --destdir (files land at $STAGE/boot/system/...).
-python3 ./waf configure --prefix=/boot/system
+#
+# --no-libdbus: waf turns D-Bus device reservation on by itself whenever dbus-1
+# is installed on the build machine, which links jackd to libdbus-1.so.3. That
+# feature reserves ALSA cards through a Linux session bus and does nothing on
+# Haiku, and the package does not require dbus, so jackd would fail to start on
+# a machine without it.
+#
+# CC/CXX: waf prefers clang over gcc whenever clang is installed (it is on any
+# machine that has built Wine), and lld hangs linking the hmulti driver. Pin the
+# system gcc so the package does not depend on what else is installed.
+CC=gcc CXX=g++ python3 ./waf configure --prefix=/boot/system --no-libdbus
 python3 ./waf build
 python3 ./waf install --destdir="$STAGE"
 

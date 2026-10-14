@@ -1,5 +1,5 @@
 name			jack
-version			1.9.23-5
+version			1.9.23-6
 architecture	x86_64
 summary			"JACK2 low-latency audio server (native Haiku port)"
 description		"A native Haiku port of JACK2 (jackd2), the low-latency audio server,
@@ -25,6 +25,8 @@ provides {
 }
 requires {
 	haiku
+	lib:libopus
+	lib:libsamplerate
 }
 urls {
 	"https://github.com/rations/jack-port-haiku"
