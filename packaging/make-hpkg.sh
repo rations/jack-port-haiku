@@ -1,5 +1,6 @@
 #!/bin/sh
-# make-hpkg.sh — build the `jack` .hpkg on a running Haiku (hrev59846 x86_64).
+# make-hpkg.sh — build the `jack` .hpkg on a running Haiku (x86_64). The
+# package pins no hrev, so build it on the nightly it will be installed on.
 #
 # Run ON Haiku (native). Produces jack-<version>-<revision>-x86_64.hpkg here in
 # packaging/. Install it on a tester machine with:  pkgman install ./jack-*.hpkg
@@ -8,7 +9,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 VERSION=1.9.23
-REVISION=4
+REVISION=5
 STAGE="$HERE/stage"
 
 # Build prerequisites (idempotent). A minimal Haiku lacks mpc/mpfr (compiler) and
