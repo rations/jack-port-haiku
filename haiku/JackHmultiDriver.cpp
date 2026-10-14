@@ -292,6 +292,48 @@ int JackHmultiDriver::SetupBuffers(jack_nframes_t buffer_size, int playback_chan
         return -1;
     }
 
+    // A driver may ignore request_playback_buffers and clock a ring of its own
+    // depth, yet copy descriptors only for the rows requested: auich reports its
+    // buffer_count but fills min(buffer_count, request) rows, leaving the rest
+    // zeroed. Ask again for the whole ring so every buffer the device cycles
+    // through has a descriptor; the rows are already allocated (the bounds check
+    // above capped the count at HMULTI_MAX_BUFFERS).
+    if (fBufferList.return_playback_buffers > fBufferList.request_playback_buffers) {
+        jack_info("JackHmultiDriver: device uses %d playback buffers (requested %d)",
+                  (int)fBufferList.return_playback_buffers,
+                  (int)fBufferList.request_playback_buffers);
+        fBufferList.request_playback_buffers = fBufferList.return_playback_buffers;
+        if (ioctl(fDevice, B_MULTI_GET_BUFFERS, &fBufferList, sizeof(fBufferList)) != 0) {
+            jack_error("JackHmultiDriver: B_MULTI_GET_BUFFERS failed: %s", strerror(errno));
+            return -1;
+        }
+        if (fBufferList.return_playback_buffers != fBufferList.request_playback_buffers || fBufferList.return_record_buffers > HMULTI_MAX_BUFFERS || fBufferList.return_playback_channels < playback_channels || (capture_channels > 0 && fBufferList.return_record_channels < capture_channels)) {
+            jack_error("JackHmultiDriver: buffer geometry changed on re-request (pb %d x %d)",
+                       (int)fBufferList.return_playback_buffers,
+                       (int)fBufferList.return_playback_channels);
+            return -1;
+        }
+    }
+
+    // Every descriptor the cycle will touch must point somewhere: a NULL base
+    // here would only surface later as a crash on the first buffer exchange.
+    for (int32 b = 0; b < fBufferList.return_playback_buffers; b++) {
+        for (int c = 0; c < playback_channels; c++) {
+            if (fBufferList.playback_buffers[b][c].base == NULL) {
+                jack_error("JackHmultiDriver: driver returned no playback buffer %d/%d", (int)b, c);
+                return -1;
+            }
+        }
+    }
+    for (int32 b = 0; b < fBufferList.return_record_buffers; b++) {
+        for (int c = 0; c < capture_channels; c++) {
+            if (fBufferList.record_buffers[b][c].base == NULL) {
+                jack_error("JackHmultiDriver: driver returned no record buffer %d/%d", (int)b, c);
+                return -1;
+            }
+        }
+    }
+
     // One buffer exchange drives exactly one JACK period, so capture and
     // playback must share a single buffer size. JACK has one period for both
     // directions; a device that offered different sizes could not be clocked

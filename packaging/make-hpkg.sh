@@ -9,7 +9,7 @@ set -e
 HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 VERSION=1.9.23
-REVISION=6
+REVISION=7
 STAGE="$HERE/stage"
 
 # Build prerequisites (idempotent). A minimal Haiku lacks mpc/mpfr (compiler) and
