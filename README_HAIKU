@@ -1,6 +1,10 @@
 JACK2 on Haiku
 ==============
 
+Users: install the whole stack from the JackDAW release, https://github.com/rations/jackDAW-haiku/releases
+(sh install.sh). This repository is the source of the jack package.
+
+
 This is a native port of JACK2 (jackd2), the low-latency audio server, to Haiku,
 including a new Media Kit based audio backend. It is a real port of the JACK
 engine (graph, transport, multi-client, libjack) running on Haiku, not an
@@ -102,9 +106,10 @@ Known limitations
   system can use them. Confirmed with a Behringer UMC204HD (1397:0508) and an
   XMOS-based NUX USB Audio 2.0 (20b1:2018). This is a limitation of Haiku's
   usb_audio driver, not of this port; only the built-in HD Audio codec is usable
-  with a stock system. A companion UAC2 driver (the haiku-kernel-usb project,
-  branch usb-audio-uac2) removes this limitation: with it installed, class-
-  compliant UAC2 interfaces are published as hmulti devices and JACK can use them.
+  with a stock system. The JackDAW stack's system package (built from the
+  rations/haiku fork with haiku-kernel-usb, installed by the JackDAW release)
+  adds a UAC2 driver: with it, class-compliant UAC2 interfaces are published as
+  hmulti devices and JACK can use them.
 
 - Measuring round-trip latency with jack_iodelay requires a working analog
   loopback (an output physically wired back to an input). On the built-in HDA
@@ -117,9 +122,9 @@ Installation
 
 Two ways to install, both native on Haiku (x86_64):
 
-- Prebuilt package: build the .hpkg once with `packaging/make-hpkg.sh`, then on any
-  tester machine `pkgman install ./jack-1.9.23-1-x86_64.hpkg` (it pulls no external
-  dependencies — everything it needs is in the base system).
+- Prebuilt package: the JackDAW release installs it with the rest of the stack.
+  To build it yourself, run `packaging/make-hpkg.sh`, then
+  `pkgman install ./jack-<version>-x86_64.hpkg`.
 - From source: `./build-from-source.sh` installs jackd + libjack into
   /boot/system/non-packaged (the manual Building steps above, wrapped with the
   pkgman prerequisites).
@@ -127,9 +132,8 @@ Two ways to install, both native on Haiku (x86_64):
 A HaikuPorts recipe is in `packaging/jack-1.9.23.recipe` (validate with
 `haikuporter -c jack` before use).
 
-This is the base of the JackDAW audio stack. If you use a USB audio interface, install
-the companion UAC2 driver first (haiku-kernel-usb); then this JACK server, then the
-plugins and the JackDAW DAW.
+This is the base of the JackDAW audio stack: everything else in it is a JACK client.
+The JackDAW release installs the whole stack, including the USB audio driver.
 
 Roadmap
 -------

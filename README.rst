@@ -1,6 +1,11 @@
 `JACK2 <https://jackaudio.org/>`_
 ################################
 
+.. note::
+   **Users:** install the whole stack from the `JackDAW release <https://github.com/rations/jackDAW-haiku/releases>`_
+   (``sh install.sh``). This repository is the source of the ``jack`` package.
+
+
 .. image:: https://travis-ci.org/jackaudio/jack2.svg?branch=master
    :target: https://travis-ci.org/jackaudio/jack2  
 .. image:: https://repology.org/badge/tiny-repos/jack-audio-connection-kit.svg
